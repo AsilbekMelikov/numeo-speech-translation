@@ -12,6 +12,7 @@ interface WebsocketServerOptions {
 interface IClientData {
     id: string
     socket: WebSocket
+    openAiSession: RealtimeTranslationService
     deviceInfo: {
         userAgent: string
     }
@@ -58,7 +59,6 @@ export class WsServer {
 
     private clients: Map<string, IClientData>
     private heartBeatInterval?: ReturnType<typeof setInterval>
-    private openAiService: RealtimeTranslationService
 
     constructor(options: WebsocketServerOptions) {
         this.ws = new WebSocketServer({
@@ -68,20 +68,16 @@ export class WsServer {
 
         this.clients = new Map()
 
-        this.openAiService = new RealtimeTranslationService({
-            targetLanguage: "English",
-            clientId: "1",
-            onError: (error) => {},
-            onSessionClosed: () => {},
-            onSessionReady: () => {},
-            onTextDelta: (text) => {},
-            onTextDone: (fullText) => {}
-        })
-
-        this.openAiService.connect()
-
         this.setupSocket()
         this.startHeartBeat()
+    }
+
+    private removeClient(clientId: string) {
+        const client = this.getClient(clientId)
+        if (client) {
+            client.openAiSession.disconnect()
+            this.clients.delete(clientId)
+        }
     }
 
     private addClient(client: IClientData) {
@@ -100,44 +96,60 @@ export class WsServer {
                 if (clientData.socket.readyState !== WebSocket.OPEN || !data) return
 
                 const rawBase64 = extractBase64(data.data.audioBase64)
-                this.openAiService.appendAudio(rawBase64)
+                clientData.openAiSession.appendAudio(rawBase64)
                 break
             }
         }
     }
 
     private setupSocket() {
-        this.ws
         this.ws.on('close', () => {
             console.log("we are closing the websocket for now....")
-            clearTimeout(this.heartBeatInterval)
-            this.openAiService.disconnect()
+            clearInterval(this.heartBeatInterval)
+            this.clients.forEach((client) => {
+                client.openAiSession.disconnect()
+            })
+            this.clients.clear()
         })
 
         this.ws.on('connection', (socket, request) => {
+            const openAiSession = new RealtimeTranslationService({
+                targetLanguage: "English",
+                clientId: `client_${Date.now().toString(36)}`,
+                onError: (error) => {
+                    console.error(`OpenAI session error: ${error.message}`)
+                },
+                onSessionClosed: () => {},
+                onSessionReady: () => {},
+                onTextDelta: (text) => {},
+                onTextDone: (fullText) => {
+                    if (socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({
+                            type: MessageType.SPEECH_TRANSLATION,
+                            data: { text: fullText }
+                        }))
+                    }
+                }
+            })
+
             const clientData = createClientTemplate({
                 socket,
+                openAiSession,
                 deviceInfo: {
                     userAgent: request.headers['user-agent'] ?? ''
-                } 
+                }
             })
-            this.addClient(clientData)
 
-            this.openAiService.fullTextListener((fullText) => {
-                clientData.socket.send(JSON.stringify({
-                    type: MessageType.SPEECH_TRANSLATION,
-                    data: {
-                        text: fullText
-                    }
-                }))
-            })
-            
+            this.addClient(clientData)
+            openAiSession.connect()
+
             socket.on('error', (error) => {
                 console.log(`Id: ${clientData.id} having an error, error: ${error.message}`)
             })
 
             socket.on('close', (code, reason) => {
                 console.log(`ID: ${clientData.id}, closing socket, code: ${code}, reason: ${reason}`)
+                this.removeClient(clientData.id)
             })
 
             socket.on('message', (data, isBinary) => {
@@ -165,10 +177,12 @@ export class WsServer {
     private startHeartBeat() {
         this.heartBeatInterval = setInterval(() => {
             this.clients.forEach((client) => {
-                client.socket.ping()
+                if (client.socket.readyState === WebSocket.OPEN) {
+                    client.socket.ping()
+                }
             })
         }, 10_000)
-        
+
     }
 
 
