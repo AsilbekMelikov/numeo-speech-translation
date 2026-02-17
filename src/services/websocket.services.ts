@@ -111,6 +111,7 @@ export class WsServer {
         this.ws.on('close', () => {
             console.log("we are closing the websocket for now....")
             clearTimeout(this.heartBeatInterval)
+            this.openAiService.disconnect()
         })
 
         this.ws.on('connection', (socket, request) => {
@@ -137,7 +138,6 @@ export class WsServer {
 
             socket.on('close', (code, reason) => {
                 console.log(`ID: ${clientData.id}, closing socket, code: ${code}, reason: ${reason}`)
-                this.openAiService.disconnect()
             })
 
             socket.on('message', (data, isBinary) => {
