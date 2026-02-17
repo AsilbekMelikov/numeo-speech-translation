@@ -1,0 +1,35 @@
+
+
+
+services:
+  numeo-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: numeo-backend-container
+    restart: unless-stopped
+    env_file:
+      - .env
+    expose:
+      - "8080"
+    networks:
+      - numeo-backend-network
+  nginx:
+    image: nginx:alpine
+    container_name: numeo-nginx
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+      - "8450:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - numeo-backend
+    networks:
+      - numeo-backend-network
+
+networks:
+  numeo-backend-network:
+    driver: bridge
+  
+      
