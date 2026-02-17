@@ -8,6 +8,7 @@ RUN npm ci
 
 COPY tsconfig.json ./
 COPY src ./src
+COPY nginx ./nginx
 
 RUN npm run build
 
@@ -22,4 +23,4 @@ ENV NODE_ENV=production
 RUN npm ci --only=production && npm cache clean --force
 COPY --from=builder /app/dist ./dist
 
-CMD ["npm", "start"]
+CMD ["node", "dist/server.js"]
